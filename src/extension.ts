@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { getStagedDiff, getRepoRoot } from './git';
 import { getProvider } from './providerFactory';
-import { generateQuiz } from './quiz';
+import { generateQuiz, Question } from './quiz';
 import { runQuizUI } from './ui';
 import { getConfig, setApiKey } from './config';
 import { installHook, uninstallHook } from './hookInstaller';
@@ -40,51 +40,53 @@ async function reviewStagedCommand(context: vscode.ExtensionContext) {
     return;
   }
 
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'AIditor: reading staged changes…' },
-    async () => {
-      try {
-        const diff = await getStagedDiff(folder.uri.fsPath);
-        if (!diff.trim()) {
-          vscode.window.showInformationMessage('AIditor: no staged changes (run `git add` first).');
-          return;
-        }
-
-        const cfg = getConfig();
-        const provider = await getProvider(context);
-        const quiz = await generateQuiz(diff, provider, {
-          questionCount: cfg.questionCount,
-          allowShortAnswer: cfg.allowShortAnswer,
-        });
-
-        if (quiz.trivial || quiz.questions.length === 0) {
-          vscode.window.showInformationMessage('AIditor: this diff looks trivial — nothing to quiz on.');
-          return;
-        }
-
-        const result = await runQuizUI(quiz.questions, diff, provider);
-
-        if (result.aborted) {
-          vscode.window.showWarningMessage('AIditor: review cancelled.');
-          return;
-        }
-
-        const fraction = result.total === 0 ? 1 : result.correct / result.total;
-        const passed = fraction >= cfg.passThreshold;
-
-        if (passed) {
-          vscode.window.showInformationMessage(`AIditor: passed! ${result.correct}/${result.total} correct.`);
-        } else {
-          vscode.window.showWarningMessage(
-            `AIditor: ${result.correct}/${result.total} correct — below the pass threshold. Consider re-reading the diff.`
-          );
-        }
-      } catch (err: any) {
-        vscode.window.showErrorMessage(`AIditor error: ${err.message}`);
-        outputChannel.appendLine(err.stack ?? err.message);
+  try {
+      const diff = await getStagedDiff(folder.uri.fsPath);
+      if (!diff.trim()) {
+        vscode.window.showInformationMessage('AIditor: no staged changes (run `git add` first).');
+        return;
       }
+
+      const cfg = getConfig();
+      const provider = await getProvider(context);
+
+      const quizPromise = generateQuiz(diff, provider, {
+        questionCount: cfg.questionCount,
+        allowShortAnswer: cfg.allowShortAnswer,
+      }).then((quiz) => {
+        if (quiz.trivial || quiz.questions.length === 0) {
+
+          return [] as Question[];
+        }
+        return quiz.questions;
+      });
+
+      const result = await runQuizUI(quizPromise, diff, provider);
+
+      if (result.aborted) {
+        vscode.window.showWarningMessage('AIditor: review cancelled.');
+        return;
+      }
+
+      if (result.total === 0) {
+        vscode.window.showInformationMessage('AIditor: this diff looks trivial — nothing to quiz on.');
+        return;
+      }
+
+      const fraction = result.total === 0 ? 1 : result.correct / result.total;
+      const passed = fraction >= cfg.passThreshold;
+
+      if (passed) {
+        vscode.window.showInformationMessage(`AIditor: passed! ${result.correct}/${result.total} correct.`);
+      } else {
+        vscode.window.showWarningMessage(
+          `AIditor: ${result.correct}/${result.total} correct — below the pass threshold. Consider re-reading the diff.`
+        );
+      }
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`AIditor error: ${err.message}`);
+      outputChannel.appendLine(err.stack ?? err.message);
     }
-  );
 }
 
 async function hookCommand(install: boolean) {
@@ -113,7 +115,10 @@ async function setApiKeyCommand(context: vscode.ExtensionContext) {
   });
   if (key) {
     await setApiKey(context, key);
-    vscode.window.showInformationMessage('AIditor: API key saved.');
+    await vscode.workspace
+      .getConfiguration('aiditor')
+      .update('provider', 'byok', vscode.ConfigurationTarget.Global);
+    vscode.window.showInformationMessage('AIditor: API key saved. Switched provider to BYOK.');
   }
 }
 

@@ -18,7 +18,7 @@ export interface QuizRunResult {
  * pushes back { submit | next | close }.
  */
 export async function runQuizUI(
-  questions: Question[],
+  questionsPromise: Question[] | Promise<Question[]>,
   diff: string,
   provider: LLMProvider
 ): Promise<QuizRunResult> {
@@ -71,6 +71,23 @@ export async function runQuizUI(
   }
 
   try {
+    // Show the loading state immediately while questions are being generated
+    post({ type: 'loading' });
+
+    let questions: Question[];
+    try {
+      questions = await questionsPromise;
+    } catch (err: any) {
+      if (disposed) {
+        return { total: 0, correct: 0, details: [], aborted: true };
+      }
+      throw err;
+    }
+
+    if (disposed) {
+      return { total: questions.length, correct: 0, details: [], aborted: true };
+    }
+
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
 
@@ -117,6 +134,10 @@ export async function runQuizUI(
       if (nextMsg.type === '__disposed__') {
         return { total: questions.length, correct: correctCount, details, aborted: true };
       }
+    }
+
+    if (questions.length === 0) {
+      return { total: 0, correct: 0, details: [], aborted: false };
     }
 
     const fraction = questions.length === 0 ? 1 : correctCount / questions.length;
@@ -324,8 +345,36 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .finish.fail .score, .finish.fail .verdict-label { color: var(--fail-color); }
 .finish .actions { justify-content: center; }
 
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  text-align: center;
+}
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--hairline);
+  border-top-color: var(--vscode-focusBorder);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 20px;
+}
+.loading-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground);
+  margin-bottom: 6px;
+}
+.loading-sub {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .spinner { animation: none; }
+  .spinner, .loading-spinner { animation: none; }
   .dot, .option, button.primary { transition: none; }
 }
 `;
@@ -360,6 +409,15 @@ function renderDots(total, index, state) {
 
 window.addEventListener('message', (event) => {
   const msg = event.data;
+
+  if (msg.type === 'loading') {
+    app.innerHTML =
+      '<div class="loading-container">' +
+      '<div class="loading-spinner"></div>' +
+      '<div class="loading-text">Generating review questions\u2026</div>' +
+      '<div class="loading-sub">Analyzing your staged changes</div>' +
+      '</div>';
+  }
 
   if (msg.type === 'showQuestion') {
     currentQuestion = msg.question;

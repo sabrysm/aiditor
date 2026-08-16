@@ -33,8 +33,9 @@ Access these via the VS Code Command Palette (`Cmd/Ctrl + Shift + P`):
 - **AIditor: Review Staged Changes** — Run the quiz manually (also available as a button in the Source Control panel).
 - **AIditor: Install Pre-Commit Hook (Hard Enforcement)** — Installs the hook into `.git/hooks/pre-commit`. Automatically chains with existing hooks if present.
 - **AIditor: Uninstall Pre-Commit Hook** — Removes the hook and restores your previous setup.
-- **AIditor: Set BYOK API Key** — Securely store your Anthropic or OpenAI API key.
-
+- **AIditor: Set BYOK API Key** — stores your Anthropic/OpenAI key in Secret Storage and switches
+  `aiditor.provider` to `byok` automatically.
+  
 ### 3. Settings
 
 | Setting | Default | Description |

@@ -3,7 +3,12 @@
 All notable changes to AIditor are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 2026-08-16
+## [1.0.1] - 2026-08-16
+
+### Added
+- Setting a BYOK API key automatically switches aiditor.provider to byok.
+
+## [1.0.0] - 2026-08-16
 
 ### Added
 - Initial release.
