@@ -1,0 +1,132 @@
+{
+  "name": "aiditor",
+  "displayName": "AIditor",
+  "description": "Quizzes you on your staged changes before you commit, to make sure you actually reviewed AI-generated code (not just accepted it).",
+  "version": "1.0.0",
+  "publisher": "asabry",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sabrysm/aiditor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sabrysm/aiditor/issues"
+  },
+  "homepage": "https://github.com/sabrysm/aiditor#readme",
+  "keywords": [
+    "git",
+    "code review",
+    "ai",
+    "llm",
+    "pre-commit",
+    "quiz",
+    "comprehension"
+  ],
+  "galleryBanner": {
+    "color": "#161B22",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other", "SCM Providers"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiditor.reviewStaged",
+        "title": "AIditor: Review Staged Changes",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "aiditor.installHook",
+        "title": "AIditor: Install Pre-Commit Hook (Hard Enforcement)"
+      },
+      {
+        "command": "aiditor.uninstallHook",
+        "title": "AIditor: Uninstall Pre-Commit Hook"
+      },
+      {
+        "command": "aiditor.setApiKey",
+        "title": "AIditor: Set BYOK API Key"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "aiditor.reviewStaged",
+          "when": "scmProvider == git",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AIditor",
+      "properties": {
+        "aiditor.provider": {
+          "type": "string",
+          "enum": ["vscode-lm", "byok"],
+          "default": "vscode-lm",
+          "description": "Which LLM backend generates and grades quiz questions. 'vscode-lm' uses VS Code's built-in Language Model API (needs Copilot or another model provider extension). 'byok' calls Anthropic/OpenAI directly with your own API key."
+        },
+        "aiditor.byokProvider": {
+          "type": "string",
+          "enum": ["anthropic", "openai"],
+          "default": "anthropic",
+          "description": "Which API to call when aiditor.provider is 'byok'."
+        },
+        "aiditor.byokModel": {
+          "type": "string",
+          "default": "claude-sonnet-4-6",
+          "description": "Model name to request for BYOK calls (e.g. claude-sonnet-4-6, gpt-4o)."
+        },
+        "aiditor.vscodeLmFamily": {
+          "type": "string",
+          "default": "gpt-4o",
+          "description": "Model family to request via vscode.lm. Must be available through an installed model provider (e.g. GitHub Copilot)."
+        },
+        "aiditor.questionCount": {
+          "type": "number",
+          "default": 3,
+          "minimum": 2,
+          "maximum": 6,
+          "description": "Number of questions to generate per review."
+        },
+        "aiditor.allowShortAnswer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow free-text questions (graded by the LLM against a rubric), not just multiple choice. Free-text questions are harder to pass by guessing."
+        },
+        "aiditor.passThreshold": {
+          "type": "number",
+          "default": 0.75,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of questions that must be answered correctly to pass (0-1)."
+        },
+        "aiditor.bridgePort": {
+          "type": "number",
+          "default": 43117,
+          "description": "Local port the running extension listens on so the pre-commit hook can reach it."
+        },
+        "aiditor.failClosedOnError": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, an internal error (e.g. LLM API failure) blocks the commit. If false, errors fail open and the commit is allowed, so a bug in this extension can't brick your workflow."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.4.0"
+  }
+}
