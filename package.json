@@ -1,5 +1,5 @@
 {
-  "name": "aiditor",
+  "name": "aiditor-vscode",
   "displayName": "AIditor",
   "description": "Quizzes you on your staged changes before you commit, to make sure you actually reviewed AI-generated code (not just accepted it).",
   "version": "1.0.0",
