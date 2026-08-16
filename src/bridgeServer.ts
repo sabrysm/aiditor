@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getStagedDiff } from './git';
 import { getProvider } from './providerFactory';
-import { generateQuiz } from './quiz';
+import { generateQuiz, Question } from './quiz';
 import { runQuizUI } from './ui';
 import { getConfig } from './config';
 
@@ -48,36 +48,56 @@ export function startBridgeServer(
 
         outputChannel.appendLine(`[bridge] Review requested for ${cwd}`);
 
-        const diff = await getStagedDiff(cwd);
+        const diffPromise = getStagedDiff(cwd);
+        const providerPromise = getProvider(context);
+
+        // Start LLM quiz generation concurrently while the webview panel is created instantly
+        const quizPromise = (async () => {
+          const diff = await diffPromise;
+          if (!diff.trim()) {
+            return [] as Question[];
+          }
+          const liveCfg = getConfig();
+          const provider = await providerPromise;
+          const quiz = await generateQuiz(diff, provider, {
+            questionCount: liveCfg.questionCount,
+            allowShortAnswer: liveCfg.allowShortAnswer,
+          });
+          if (quiz.trivial || quiz.questions.length === 0) {
+            return [] as Question[];
+          }
+          return quiz.questions;
+        })();
+
+        const result = await runQuizUI(quizPromise, diffPromise, providerPromise);
+
+        if (result.aborted) {
+          outputChannel.appendLine(`[bridge] Review aborted by user.`);
+          res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
+          res.end(JSON.stringify({ passed: false, reason: 'review aborted' }));
+          return;
+        }
+
+        const diff = await diffPromise;
         if (!diff.trim()) {
-          res.writeHead(200);
+          res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
           res.end(JSON.stringify({ passed: true, reason: 'no staged changes' }));
           return;
         }
 
-        const liveCfg = getConfig();
-        const provider = await getProvider(context);
-        const quiz = await generateQuiz(diff, provider, {
-          questionCount: liveCfg.questionCount,
-          allowShortAnswer: liveCfg.allowShortAnswer,
-        });
-
-        if (quiz.trivial || quiz.questions.length === 0) {
-          res.writeHead(200);
+        if (result.total === 0) {
+          outputChannel.appendLine(`[bridge] Trivial diff, allowing commit.`);
+          res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
           res.end(JSON.stringify({ passed: true, reason: 'trivial diff' }));
           return;
         }
 
-        await vscode.window.showInformationMessage(
-          'AIditor: review your staged changes before this commit goes through.'
-        );
-
-        const result = await runQuizUI(quiz.questions, diff, provider);
-        const fraction = result.total === 0 ? 1 : result.correct / result.total;
-        const passed = !result.aborted && fraction >= liveCfg.passThreshold;
+        const liveCfg = getConfig();
+        const fraction = result.correct / result.total;
+        const passed = fraction >= liveCfg.passThreshold;
 
         outputChannel.appendLine(
-          `[bridge] Result: ${result.correct}/${result.total}, passed=${passed}, aborted=${result.aborted}`
+          `[bridge] Result: ${result.correct}/${result.total}, passed=${passed}`
         );
 
         if (!passed) {
@@ -90,12 +110,12 @@ export function startBridgeServer(
           );
         }
 
-        res.writeHead(200);
+        res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
         res.end(JSON.stringify({ passed, correct: result.correct, total: result.total }));
       } catch (err: any) {
         outputChannel.appendLine(`[bridge] Error: ${err.message}`);
         const failClosed = getConfig().failClosedOnError;
-        res.writeHead(200);
+        res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
         res.end(JSON.stringify({ passed: !failClosed, error: err.message }));
       }
     });

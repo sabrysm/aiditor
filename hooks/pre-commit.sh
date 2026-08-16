@@ -35,7 +35,7 @@ if [ -z "$RESPONSE" ]; then
   exit 1
 fi
 
-PASSED=$(printf '%s' "$RESPONSE" | grep -o '"passed":[a-z]*' | head -1 | cut -d: -f2)
+PASSED=$(printf '%s' "$RESPONSE" | grep -o '"passed": *[a-z]*' | head -1 | sed 's/.*:[ ]*//')
 
 if [ "$PASSED" = "true" ]; then
   exit 0

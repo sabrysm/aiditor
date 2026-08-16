@@ -41,38 +41,47 @@ async function reviewStagedCommand(context: vscode.ExtensionContext) {
   }
 
   try {
-      const diff = await getStagedDiff(folder.uri.fsPath);
+    const diffPromise = getStagedDiff(folder.uri.fsPath);
+    const providerPromise = getProvider(context);
+
+    // Start LLM quiz generation concurrently in the background while the UI
+    // webview panel is created and displayed instantaneously.
+    const quizPromise = (async () => {
+      const diff = await diffPromise;
       if (!diff.trim()) {
-        vscode.window.showInformationMessage('AIditor: no staged changes (run `git add` first).');
-        return;
+        return [] as Question[];
       }
-
       const cfg = getConfig();
-      const provider = await getProvider(context);
-
-      const quizPromise = generateQuiz(diff, provider, {
+      const provider = await providerPromise;
+      const quiz = await generateQuiz(diff, provider, {
         questionCount: cfg.questionCount,
         allowShortAnswer: cfg.allowShortAnswer,
-      }).then((quiz) => {
-        if (quiz.trivial || quiz.questions.length === 0) {
-
-          return [] as Question[];
-        }
-        return quiz.questions;
       });
-
-      const result = await runQuizUI(quizPromise, diff, provider);
-
-      if (result.aborted) {
-        vscode.window.showWarningMessage('AIditor: review cancelled.');
-        return;
+      if (quiz.trivial || quiz.questions.length === 0) {
+        return [] as Question[];
       }
+      return quiz.questions;
+    })();
 
-      if (result.total === 0) {
-        vscode.window.showInformationMessage('AIditor: this diff looks trivial — nothing to quiz on.');
-        return;
-      }
+    const result = await runQuizUI(quizPromise, diffPromise, providerPromise);
 
+    if (result.aborted) {
+      vscode.window.showWarningMessage('AIditor: review cancelled.');
+      return;
+    }
+
+    const diff = await diffPromise;
+    if (!diff.trim()) {
+      vscode.window.showInformationMessage('AIditor: no staged changes (run `git add` first).');
+      return;
+    }
+
+    if (result.total === 0) {
+      vscode.window.showInformationMessage('AIditor: this diff looks trivial — nothing to quiz on.');
+      return;
+    }
+
+      const cfg = getConfig();
       const fraction = result.total === 0 ? 1 : result.correct / result.total;
       const passed = fraction >= cfg.passThreshold;
 

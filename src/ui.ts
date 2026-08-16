@@ -19,8 +19,8 @@ export interface QuizRunResult {
  */
 export async function runQuizUI(
   questionsPromise: Question[] | Promise<Question[]>,
-  diff: string,
-  provider: LLMProvider
+  diffInput: string | Promise<string>,
+  providerInput: LLMProvider | Promise<LLMProvider>
 ): Promise<QuizRunResult> {
   const panel = vscode.window.createWebviewPanel(
     'aiditorQuiz',
@@ -71,9 +71,6 @@ export async function runQuizUI(
   }
 
   try {
-    // Show the loading state immediately while questions are being generated
-    post({ type: 'loading' });
-
     let questions: Question[];
     try {
       questions = await questionsPromise;
@@ -86,6 +83,10 @@ export async function runQuizUI(
 
     if (disposed) {
       return { total: questions.length, correct: 0, details: [], aborted: true };
+    }
+
+    if (questions.length === 0) {
+      return { total: 0, correct: 0, details: [], aborted: false };
     }
 
     for (let i = 0; i < questions.length; i++) {
@@ -114,6 +115,8 @@ export async function runQuizUI(
         feedback = q.explanation;
       } else {
         post({ type: 'grading' });
+        const diff = await Promise.resolve(diffInput);
+        const provider = await Promise.resolve(providerInput);
         const graded = await gradeShortAnswer(q, diff, submitMsg.value ?? '', provider);
         isCorrect = graded.correct;
         feedback = graded.feedback;
@@ -134,10 +137,6 @@ export async function runQuizUI(
       if (nextMsg.type === '__disposed__') {
         return { total: questions.length, correct: correctCount, details, aborted: true };
       }
-    }
-
-    if (questions.length === 0) {
-      return { total: 0, correct: 0, details: [], aborted: false };
     }
 
     const fraction = questions.length === 0 ? 1 : correctCount / questions.length;
@@ -182,7 +181,13 @@ function getHtml(nonce: string): string {
     '<style nonce="' + nonce + '">' + CSS + '</style>' +
     '</head>' +
     '<body>' +
-    '<div class="card" id="app"></div>' +
+    '<div class="card" id="app">' +
+    '<div class="loading-container">' +
+    '<div class="loading-spinner"></div>' +
+    '<div class="loading-text">Generating review questions\u2026</div>' +
+    '<div class="loading-sub">Analyzing your staged changes</div>' +
+    '</div>' +
+    '</div>' +
     '<script nonce="' + nonce + '">' + SCRIPT + '</script>' +
     '</body>' +
     '</html>'
@@ -524,20 +529,33 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'finish') {
     const verdict = msg.passed ? 'Passed' : 'Below threshold';
     const message = msg.passed
-      ? 'Solid \u2014 you can go ahead and commit.'
-      : 'Give the diff another look before committing.';
+      ? 'Solid \u2014 committing changes now\u2026'
+      : 'Commit blocked. Give the diff another look before committing.';
 
     app.innerHTML =
       '<div class="finish ' + (msg.passed ? 'pass' : 'fail') + '">' +
       '<div class="score">' + msg.correct + '/' + msg.total + '</div>' +
       '<div class="verdict-label">' + verdict + '</div>' +
       '<p class="msg">' + escapeHtml(message) + '</p>' +
-      '<div class="actions"><button class="primary" id="doneBtn">Done</button></div>' +
+      '<div class="actions"><button class="primary" id="doneBtn">' + (msg.passed ? 'Done' : 'Close') + '</button></div>' +
       '</div>';
 
-    document.getElementById('doneBtn').addEventListener('click', () => {
-      vscode.postMessage({ type: 'close' });
-    });
+    let closed = false;
+    const closeUI = () => {
+      if (!closed) {
+        closed = true;
+        vscode.postMessage({ type: 'close' });
+      }
+    };
+
+    document.getElementById('doneBtn').addEventListener('click', closeUI);
+
+    // Auto-close after brief display so the commit / review completes seamlessly
+    if (msg.passed) {
+      setTimeout(closeUI, 1200);
+    } else {
+      setTimeout(closeUI, 3500);
+    }
   }
 });
 `;
