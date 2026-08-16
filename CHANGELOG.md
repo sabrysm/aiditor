@@ -3,6 +3,12 @@
 All notable changes to AIditor are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] - 2026-08-16
+### Changed
+- Review panel now opens instantly with a loading state.
+### Fixed
+- Fixed pre-commit hook hanging git commit indefinitely.
+
 ## [1.0.1] - 2026-08-16
 
 ### Added
