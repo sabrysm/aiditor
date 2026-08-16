@@ -1,6 +1,6 @@
 {
   "name": "aiditor-vscode",
-  "displayName": "AIditor",
+  "displayName": "AIditor: Code Review Quiz",
   "description": "Quizzes you on your staged changes before you commit, to make sure you actually reviewed AI-generated code (not just accepted it).",
   "version": "1.0.0",
   "publisher": "asabry",
