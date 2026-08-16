@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { getStagedDiff, getRepoRoot } from './git';
 import { getProvider } from './providerFactory';
-import { generateQuiz, Question } from './quiz';
 import { runQuizUI } from './ui';
 import { getConfig, setApiKey } from './config';
 import { installHook, uninstallHook } from './hookInstaller';
@@ -41,61 +40,51 @@ async function reviewStagedCommand(context: vscode.ExtensionContext) {
   }
 
   try {
-    const diffPromise = getStagedDiff(folder.uri.fsPath);
-    const providerPromise = getProvider(context);
-
-    // Start LLM quiz generation concurrently in the background while the UI
-    // webview panel is created and displayed instantaneously.
-    const quizPromise = (async () => {
-      const diff = await diffPromise;
-      if (!diff.trim()) {
-        return [] as Question[];
+    // Only the fast setup steps sit behind this progress toast. The panel
+    // itself opens immediately after and shows its own loading state while
+    // the quiz is generated, rather than leaving a stale "reading staged
+    // changes…" notification up for the whole quiz session.
+    const { diff, provider } = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'AIditor: reading staged changes…' },
+      async () => {
+        const diff = await getStagedDiff(folder.uri.fsPath);
+        const provider = await getProvider(context);
+        return { diff, provider };
       }
-      const cfg = getConfig();
-      const provider = await providerPromise;
-      const quiz = await generateQuiz(diff, provider, {
-        questionCount: cfg.questionCount,
-        allowShortAnswer: cfg.allowShortAnswer,
-      });
-      if (quiz.trivial || quiz.questions.length === 0) {
-        return [] as Question[];
-      }
-      return quiz.questions;
-    })();
+    );
 
-    const result = await runQuizUI(quizPromise, diffPromise, providerPromise);
+    if (!diff.trim()) {
+      vscode.window.showInformationMessage('AIditor: no staged changes (run `git add` first).');
+      return;
+    }
+
+    const result = await runQuizUI(diff, provider);
+
+    if (result.trivial) {
+      vscode.window.showInformationMessage('AIditor: this diff looks trivial — nothing to quiz on.');
+      return;
+    }
 
     if (result.aborted) {
       vscode.window.showWarningMessage('AIditor: review cancelled.');
       return;
     }
 
-    const diff = await diffPromise;
-    if (!diff.trim()) {
-      vscode.window.showInformationMessage('AIditor: no staged changes (run `git add` first).');
-      return;
-    }
+    const cfg = getConfig();
+    const fraction = result.total === 0 ? 1 : result.correct / result.total;
+    const passed = fraction >= cfg.passThreshold;
 
-    if (result.total === 0) {
-      vscode.window.showInformationMessage('AIditor: this diff looks trivial — nothing to quiz on.');
-      return;
+    if (passed) {
+      vscode.window.showInformationMessage(`AIditor: passed! ${result.correct}/${result.total} correct.`);
+    } else {
+      vscode.window.showWarningMessage(
+        `AIditor: ${result.correct}/${result.total} correct — below the pass threshold. Consider re-reading the diff.`
+      );
     }
-
-      const cfg = getConfig();
-      const fraction = result.total === 0 ? 1 : result.correct / result.total;
-      const passed = fraction >= cfg.passThreshold;
-
-      if (passed) {
-        vscode.window.showInformationMessage(`AIditor: passed! ${result.correct}/${result.total} correct.`);
-      } else {
-        vscode.window.showWarningMessage(
-          `AIditor: ${result.correct}/${result.total} correct — below the pass threshold. Consider re-reading the diff.`
-        );
-      }
-    } catch (err: any) {
-      vscode.window.showErrorMessage(`AIditor error: ${err.message}`);
-      outputChannel.appendLine(err.stack ?? err.message);
-    }
+  } catch (err: any) {
+    vscode.window.showErrorMessage(`AIditor error: ${err.message}`);
+    outputChannel.appendLine(err.stack ?? err.message);
+  }
 }
 
 async function hookCommand(install: boolean) {

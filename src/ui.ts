@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Question, gradeShortAnswer } from './quiz';
+import { Question, generateQuiz, gradeShortAnswer } from './quiz';
 import { LLMProvider } from './llmProvider';
 import { getConfig } from './config';
 
@@ -9,19 +9,22 @@ export interface QuizRunResult {
   details: { question: string; correct: boolean; feedback?: string }[];
   /** True if the user closed the panel before finishing a question. */
   aborted: boolean;
+  /** True if the diff was judged trivial and no questions were asked. */
+  trivial: boolean;
 }
 
 /**
- * Runs the quiz in a themed Webview panel (rather than QuickPick/InputBox),
- * driven by a simple message protocol: the extension owns all state and
- * pushes { showQuestion | grading | feedback | finish } messages; the panel
- * pushes back { submit | next | close }.
+ * Opens the quiz panel immediately (with a loading state baked into the
+ * initial HTML, so it's visible before any JS or LLM call completes), then
+ * generates the quiz in the background. This way "open the panel" and
+ * "wait for the LLM" are decoupled: the panel appears right away instead of
+ * only popping up once the whole quiz is already generated.
+ *
+ * Driven by a simple message protocol: the extension owns all state and
+ * pushes { trivial | showQuestion | grading | feedback | finish } messages;
+ * the panel pushes back { submit | next | close }.
  */
-export async function runQuizUI(
-  questionsPromise: Question[] | Promise<Question[]>,
-  diffInput: string | Promise<string>,
-  providerInput: LLMProvider | Promise<LLMProvider>
-): Promise<QuizRunResult> {
+export async function runQuizUI(diff: string, provider: LLMProvider): Promise<QuizRunResult> {
   const panel = vscode.window.createWebviewPanel(
     'aiditorQuiz',
     'AIditor: Review Your Changes',
@@ -71,22 +74,28 @@ export async function runQuizUI(
   }
 
   try {
-    let questions: Question[];
-    try {
-      questions = await questionsPromise;
-    } catch (err: any) {
-      if (disposed) {
-        return { total: 0, correct: 0, details: [], aborted: true };
-      }
-      throw err;
-    }
+    const cfg = getConfig();
+
+    // The panel is already open and showing a loading state at this point,
+    // so this LLM call no longer blocks the panel from appearing.
+    const quiz = await generateQuiz(diff, provider, {
+      questionCount: cfg.questionCount,
+      allowShortAnswer: cfg.allowShortAnswer,
+    });
 
     if (disposed) {
-      return { total: questions.length, correct: 0, details: [], aborted: true };
+      return { total: 0, correct: 0, details, aborted: true, trivial: false };
     }
 
-    if (questions.length === 0) {
-      return { total: 0, correct: 0, details: [], aborted: false };
+    const questions = quiz.questions ?? [];
+
+    if (quiz.trivial || questions.length === 0) {
+      post({
+        type: 'trivial',
+        message: 'This diff looks trivial \u2014 nothing meaningful to quiz on. Go ahead and commit.',
+      });
+      await waitForMessage();
+      return { total: 0, correct: 0, details, aborted: false, trivial: true };
     }
 
     for (let i = 0; i < questions.length; i++) {
@@ -104,7 +113,7 @@ export async function runQuizUI(
 
       const submitMsg = await waitForMessage();
       if (submitMsg.type === '__disposed__') {
-        return { total: questions.length, correct: correctCount, details, aborted: true };
+        return { total: questions.length, correct: correctCount, details, aborted: true, trivial: false };
       }
 
       let isCorrect = false;
@@ -115,8 +124,6 @@ export async function runQuizUI(
         feedback = q.explanation;
       } else {
         post({ type: 'grading' });
-        const diff = await Promise.resolve(diffInput);
-        const provider = await Promise.resolve(providerInput);
         const graded = await gradeShortAnswer(q, diff, submitMsg.value ?? '', provider);
         isCorrect = graded.correct;
         feedback = graded.feedback;
@@ -135,7 +142,7 @@ export async function runQuizUI(
 
       const nextMsg = await waitForMessage();
       if (nextMsg.type === '__disposed__') {
-        return { total: questions.length, correct: correctCount, details, aborted: true };
+        return { total: questions.length, correct: correctCount, details, aborted: true, trivial: false };
       }
     }
 
@@ -147,7 +154,7 @@ export async function runQuizUI(
     // Whether they click "Done" or just close the tab, the quiz itself is
     // already complete at this point, so this always counts as finished.
     await waitForMessage();
-    return { total: questions.length, correct: correctCount, details, aborted: false };
+    return { total: questions.length, correct: correctCount, details, aborted: false, trivial: false };
   } finally {
     disposeListener.dispose();
     messageListener.dispose();
@@ -167,6 +174,11 @@ function getNonce(): string {
 }
 
 function getHtml(nonce: string): string {
+  const initialContent =
+    '<div class="eyebrow"><span>AIditor review</span></div>' +
+    '<h1>Reading your changes\u2026</h1>' +
+    '<div class="grading"><span class="spinner"></span><span>Generating your review questions\u2026</span></div>';
+
   return (
     '<!DOCTYPE html>' +
     '<html lang="en">' +
@@ -181,13 +193,7 @@ function getHtml(nonce: string): string {
     '<style nonce="' + nonce + '">' + CSS + '</style>' +
     '</head>' +
     '<body>' +
-    '<div class="card" id="app">' +
-    '<div class="loading-container">' +
-    '<div class="loading-spinner"></div>' +
-    '<div class="loading-text">Generating review questions\u2026</div>' +
-    '<div class="loading-sub">Analyzing your staged changes</div>' +
-    '</div>' +
-    '</div>' +
+    '<div class="card" id="app">' + initialContent + '</div>' +
     '<script nonce="' + nonce + '">' + SCRIPT + '</script>' +
     '</body>' +
     '</html>'
@@ -350,36 +356,8 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .finish.fail .score, .finish.fail .verdict-label { color: var(--fail-color); }
 .finish .actions { justify-content: center; }
 
-.loading-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 24px;
-  text-align: center;
-}
-.loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--hairline);
-  border-top-color: var(--vscode-focusBorder);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-bottom: 20px;
-}
-.loading-text {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--vscode-editor-foreground);
-  margin-bottom: 6px;
-}
-.loading-sub {
-  font-size: 12px;
-  color: var(--vscode-descriptionForeground);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .spinner, .loading-spinner { animation: none; }
+  .spinner { animation: none; }
   .dot, .option, button.primary { transition: none; }
 }
 `;
@@ -415,13 +393,16 @@ function renderDots(total, index, state) {
 window.addEventListener('message', (event) => {
   const msg = event.data;
 
-  if (msg.type === 'loading') {
+  if (msg.type === 'trivial') {
     app.innerHTML =
-      '<div class="loading-container">' +
-      '<div class="loading-spinner"></div>' +
-      '<div class="loading-text">Generating review questions\u2026</div>' +
-      '<div class="loading-sub">Analyzing your staged changes</div>' +
+      '<div class="finish">' +
+      '<div class="verdict-label">Nothing to review</div>' +
+      '<p class="msg">' + escapeHtml(msg.message) + '</p>' +
+      '<div class="actions"><button class="primary" id="doneBtn">Close</button></div>' +
       '</div>';
+    document.getElementById('doneBtn').addEventListener('click', () => {
+      vscode.postMessage({ type: 'close' });
+    });
   }
 
   if (msg.type === 'showQuestion') {
@@ -529,33 +510,20 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'finish') {
     const verdict = msg.passed ? 'Passed' : 'Below threshold';
     const message = msg.passed
-      ? 'Solid \u2014 committing changes now\u2026'
-      : 'Commit blocked. Give the diff another look before committing.';
+      ? 'Solid \u2014 you can go ahead and commit.'
+      : 'Give the diff another look before committing.';
 
     app.innerHTML =
       '<div class="finish ' + (msg.passed ? 'pass' : 'fail') + '">' +
       '<div class="score">' + msg.correct + '/' + msg.total + '</div>' +
       '<div class="verdict-label">' + verdict + '</div>' +
       '<p class="msg">' + escapeHtml(message) + '</p>' +
-      '<div class="actions"><button class="primary" id="doneBtn">' + (msg.passed ? 'Done' : 'Close') + '</button></div>' +
+      '<div class="actions"><button class="primary" id="doneBtn">Done</button></div>' +
       '</div>';
 
-    let closed = false;
-    const closeUI = () => {
-      if (!closed) {
-        closed = true;
-        vscode.postMessage({ type: 'close' });
-      }
-    };
-
-    document.getElementById('doneBtn').addEventListener('click', closeUI);
-
-    // Auto-close after brief display so the commit / review completes seamlessly
-    if (msg.passed) {
-      setTimeout(closeUI, 1200);
-    } else {
-      setTimeout(closeUI, 3500);
-    }
+    document.getElementById('doneBtn').addEventListener('click', () => {
+      vscode.postMessage({ type: 'close' });
+    });
   }
 });
 `;

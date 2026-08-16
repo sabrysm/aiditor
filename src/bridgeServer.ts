@@ -4,7 +4,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getStagedDiff } from './git';
 import { getProvider } from './providerFactory';
-import { generateQuiz, Question } from './quiz';
 import { runQuizUI } from './ui';
 import { getConfig } from './config';
 
@@ -48,56 +47,40 @@ export function startBridgeServer(
 
         outputChannel.appendLine(`[bridge] Review requested for ${cwd}`);
 
-        const diffPromise = getStagedDiff(cwd);
-        const providerPromise = getProvider(context);
-
-        // Start LLM quiz generation concurrently while the webview panel is created instantly
-        const quizPromise = (async () => {
-          const diff = await diffPromise;
-          if (!diff.trim()) {
-            return [] as Question[];
-          }
-          const liveCfg = getConfig();
-          const provider = await providerPromise;
-          const quiz = await generateQuiz(diff, provider, {
-            questionCount: liveCfg.questionCount,
-            allowShortAnswer: liveCfg.allowShortAnswer,
-          });
-          if (quiz.trivial || quiz.questions.length === 0) {
-            return [] as Question[];
-          }
-          return quiz.questions;
-        })();
-
-        const result = await runQuizUI(quizPromise, diffPromise, providerPromise);
-
-        if (result.aborted) {
-          outputChannel.appendLine(`[bridge] Review aborted by user.`);
-          res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
-          res.end(JSON.stringify({ passed: false, reason: 'review aborted' }));
-          return;
-        }
-
-        const diff = await diffPromise;
+        const diff = await getStagedDiff(cwd);
         if (!diff.trim()) {
-          res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
+          res.writeHead(200);
           res.end(JSON.stringify({ passed: true, reason: 'no staged changes' }));
           return;
         }
 
-        if (result.total === 0) {
-          outputChannel.appendLine(`[bridge] Trivial diff, allowing commit.`);
-          res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
+        const provider = await getProvider(context);
+
+        // Deliberately not awaited: a plain info toast with no action items
+        // can sit undismissed indefinitely, which would block this whole
+        // handler (and therefore the waiting `curl` call, and therefore
+        // `git commit` itself) on the user manually closing a notification.
+        vscode.window.showInformationMessage(
+          'AIditor: review your staged changes before this commit goes through.'
+        );
+
+        // Panel opens immediately inside runQuizUI now, with quiz generation
+        // happening in the background behind its own loading state.
+        const result = await runQuizUI(diff, provider);
+
+        if (result.trivial) {
+          outputChannel.appendLine('[bridge] Result: trivial diff, no questions asked');
+          res.writeHead(200);
           res.end(JSON.stringify({ passed: true, reason: 'trivial diff' }));
           return;
         }
 
         const liveCfg = getConfig();
-        const fraction = result.correct / result.total;
-        const passed = fraction >= liveCfg.passThreshold;
+        const fraction = result.total === 0 ? 1 : result.correct / result.total;
+        const passed = !result.aborted && fraction >= liveCfg.passThreshold;
 
         outputChannel.appendLine(
-          `[bridge] Result: ${result.correct}/${result.total}, passed=${passed}`
+          `[bridge] Result: ${result.correct}/${result.total}, passed=${passed}, aborted=${result.aborted}`
         );
 
         if (!passed) {
@@ -110,12 +93,12 @@ export function startBridgeServer(
           );
         }
 
-        res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
+        res.writeHead(200);
         res.end(JSON.stringify({ passed, correct: result.correct, total: result.total }));
       } catch (err: any) {
         outputChannel.appendLine(`[bridge] Error: ${err.message}`);
         const failClosed = getConfig().failClosedOnError;
-        res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
+        res.writeHead(200);
         res.end(JSON.stringify({ passed: !failClosed, error: err.message }));
       }
     });
