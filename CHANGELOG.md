@@ -3,6 +3,12 @@
 All notable changes to AIditor are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.5] - 2026-08-19
+
+### Fixed
+- Fixed JSON extraction failing on reasoning models (e.g. DeepSeek R1, o1) by stripping out `<think>` tags.
+- Set explicit max token limits to 4096 for BYOK providers to prevent verbose reasoning responses from truncating before producing JSON.
+
 ## [1.0.4] - 2026-08-19
 
 ### Added
