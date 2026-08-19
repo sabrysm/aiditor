@@ -10,7 +10,7 @@ If you're using AI assistants to write code, AIditor ensures you actually unders
 - **Dynamic Formats:** Uses a mix of multiple-choice and LLM-graded free-text questions. You can't beat the quiz just by pattern-matching.
 - **Native VS Code UI:** Renders a clean, themed Webview panel right next to your code, complete with progress tracking and inline feedback.
 - **Hard Enforcement:** Installs a real git `pre-commit` hook. The quiz is enforced whether you commit via the terminal, the VS Code Source Control panel, or a third-party Git GUI.
-- **Flexible LLM Backends:** Use VS Code's built-in Language Model API (via extensions like Copilot) or bring your own API key for Anthropic/OpenAI.
+- **Flexible LLM Backends:** Use VS Code's built-in Language Model API (via extensions like Copilot) or bring your own API key for Anthropic, OpenAI, Google, or Groq.
 
 ## How the Pre-Commit Hook Works
 
@@ -26,14 +26,14 @@ When you trigger a commit, the `pre-commit` hook pauses the commit process, call
 
 ### 1. Choose your LLM Backend
 - **`vscode-lm` (Default):** Uses VS Code's built-in Language Model API. Requires a provider extension (like GitHub Copilot) to be installed and signed in.
-- **`byok` (Bring Your Own Key):** Calls Anthropic or OpenAI directly. Set this up by running **AIditor: Set BYOK API Key** in the Command Palette, then set `aiditor.provider` to `"byok"` in your settings. Keys are securely stored in VS Code's encrypted Secret Storage.
+- **`byok` (Bring Your Own Key):** Calls Anthropic, OpenAI, Google, or Groq directly. Run **AIditor: Set BYOK API Key** in the Command Palette — a 3-step wizard walks you through picking a provider, pasting its key, and optionally naming a specific model (leave blank to use a sensible per-provider default). This also switches `aiditor.provider` to `byok` automatically. Keys are stored in VS Code's encrypted Secret Storage.
 
 ### 2. Commands
 Access these via the VS Code Command Palette (`Cmd/Ctrl + Shift + P`):
 - **AIditor: Review Staged Changes** — Run the quiz manually (also available as a button in the Source Control panel).
 - **AIditor: Install Pre-Commit Hook (Hard Enforcement)** — Installs the hook into `.git/hooks/pre-commit`. Automatically chains with existing hooks if present.
 - **AIditor: Uninstall Pre-Commit Hook** — Removes the hook and restores your previous setup.
-- **AIditor: Set BYOK API Key** — stores your Anthropic/OpenAI key in Secret Storage and switches
+- **AIditor: Set BYOK API Key** — 3-step wizard: choose a provider (Anthropic/OpenAI/Google/Groq), paste its API key, then optionally name a model. Stores the key in Secret Storage and switches
   `aiditor.provider` to `byok` automatically.
   
 ### 3. Settings
@@ -41,8 +41,8 @@ Access these via the VS Code Command Palette (`Cmd/Ctrl + Shift + P`):
 | Setting | Default | Description |
 |---|---|---|
 | `aiditor.provider` | `vscode-lm` | `vscode-lm` or `byok` |
-| `aiditor.byokProvider` | `anthropic` | `anthropic` or `openai` (used when provider is `byok`) |
-| `aiditor.byokModel` | `claude-sonnet-4-6` | Model name for BYOK calls |
+| `aiditor.byokProvider` | `anthropic` | `anthropic`, `openai`, `google`, or `groq` (used when provider is `byok`) |
+| `aiditor.byokModel` | _(blank)_ | Model name for BYOK calls. Blank uses a sensible default for the selected provider |
 | `aiditor.vscodeLmFamily` | `gpt-4o` | Model family requested via `vscode.lm` |
 | `aiditor.questionCount` | `3` | Questions generated per review (2-6) |
 | `aiditor.allowShortAnswer` | `true` | Include LLM-graded free-text questions |
@@ -75,11 +75,16 @@ We welcome community contributions! If you want to modify AIditor, add new model
 5. Open any Git repository in that new window, stage some changes, and run the `AIditor: Review Staged Changes` command to test your modifications.
 
 ### Architecture Overview
-If you are contributing, here are the main areas of the codebase to look at:
-- **`src/extension.ts`**: The entry point. Handles command registration and lifecycle events.
-- **`src/server.ts`**: The localhost HTTP server that acts as a bridge between the `.git/hooks/pre-commit` bash script and the VS Code extension.
-- **`src/llm/`**: Contains the logic for parsing `git diff`, formatting prompts, and connecting to the `vscode-lm` and `byok` backends.
-- **`src/webview/`**: Contains the HTML/CSS/JS for the quiz interface. It is styled using standard `var(--vscode-*)` CSS variables so it automatically adapts to the user's active color theme.
+If you are contributing, here are the main files to look at (all flat under `src/`, no subfolders):
+- **`src/extension.ts`**: The entry point. Handles command registration, the BYOK setup wizard, and lifecycle events.
+- **`src/bridgeServer.ts`**: The localhost HTTP server that bridges `.git/hooks/pre-commit` to the running VS Code extension.
+- **`src/llmProvider.ts`**: The provider classes — `vscode-lm`, plus BYOK implementations for Anthropic, OpenAI, Google, and Groq.
+- **`src/providerFactory.ts`**: Picks and constructs the right provider based on `aiditor.provider`/`aiditor.byokProvider`, with per-provider default models.
+- **`src/quiz.ts`**: Turns a diff into an LLM prompt, parses the resulting questions, and grades free-text answers.
+- **`src/ui.ts`**: The quiz Webview panel (HTML/CSS/JS in one file). Styled with `var(--vscode-*)` CSS variables so it automatically adapts to the user's active color theme.
+- **`src/git.ts`**: `git diff --staged` and repo-root helpers.
+- **`src/config.ts`**: Settings and Secret Storage helpers.
+- **`src/hookInstaller.ts`**: Installs/uninstalls the pre-commit hook, chaining any existing hook.
 
 ## Known Limitations
 - Currently assumes a single-root workspace. Multi-root workspaces are not fully supported yet.

@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { getStagedDiff, getRepoRoot } from './git';
-import { getProvider } from './providerFactory';
+import { getProvider, DEFAULT_BYOK_MODELS } from './providerFactory';
 import { runQuizUI } from './ui';
-import { getConfig, setApiKey } from './config';
+import { getConfig, setApiKey, ByokProvider } from './config';
 import { installHook, uninstallHook } from './hookInstaller';
 import { startBridgeServer, stopBridgeServer } from './bridgeServer';
 
@@ -104,20 +104,63 @@ async function hookCommand(install: boolean) {
   }
 }
 
+interface ProviderPick extends vscode.QuickPickItem {
+  value: ByokProvider;
+}
+
 async function setApiKeyCommand(context: vscode.ExtensionContext) {
+  // Step 1 of 3: which provider.
+  const providerPick = await vscode.window.showQuickPick<ProviderPick>(
+    [
+      { label: 'Anthropic', description: 'Claude models', value: 'anthropic' },
+      { label: 'OpenAI', description: 'GPT models', value: 'openai' },
+      { label: 'Google', description: 'Gemini models', value: 'google' },
+      { label: 'Groq', description: 'Fast open-weight model hosting', value: 'groq' },
+    ],
+    {
+      title: 'AIditor: BYOK Setup (1/3) — Provider',
+      placeHolder: 'Which provider do you want to use?',
+      ignoreFocusOut: true,
+    }
+  );
+  if (!providerPick) {
+    return; // cancelled — nothing saved
+  }
+
+  // Step 2 of 3: the API key.
   const key = await vscode.window.showInputBox({
-    title: 'AIditor: BYOK API Key',
-    prompt: 'Paste your Anthropic or OpenAI API key (stored securely in VS Code Secret Storage)',
+    title: `AIditor: BYOK Setup (2/3) — ${providerPick.label} API Key`,
+    prompt: `Paste your ${providerPick.label} API key (stored securely in VS Code Secret Storage)`,
     password: true,
     ignoreFocusOut: true,
   });
-  if (key) {
-    await setApiKey(context, key);
-    await vscode.workspace
-      .getConfiguration('aiditor')
-      .update('provider', 'byok', vscode.ConfigurationTarget.Global);
-    vscode.window.showInformationMessage('AIditor: API key saved. Switched provider to BYOK.');
+  if (!key) {
+    return; // cancelled — nothing saved
   }
+
+  // Step 3 of 3: the model name, optional.
+  const defaultModel = DEFAULT_BYOK_MODELS[providerPick.value];
+  const modelInput = await vscode.window.showInputBox({
+    title: `AIditor: BYOK Setup (3/3) — ${providerPick.label} Model`,
+    prompt: `Model name to use, or leave blank for the default (${defaultModel})`,
+    placeHolder: defaultModel,
+    ignoreFocusOut: true,
+  });
+  if (modelInput === undefined) {
+    return; // cancelled (Escape) — nothing saved. An empty string, submitted on
+    // purpose, is different: that means "use the default", and falls through.
+  }
+
+  await setApiKey(context, key);
+  const settings = vscode.workspace.getConfiguration('aiditor');
+  await settings.update('provider', 'byok', vscode.ConfigurationTarget.Global);
+  await settings.update('byokProvider', providerPick.value, vscode.ConfigurationTarget.Global);
+  await settings.update('byokModel', modelInput.trim(), vscode.ConfigurationTarget.Global);
+
+  const modelLabel = modelInput.trim() || `${defaultModel} (default)`;
+  vscode.window.showInformationMessage(
+    `AIditor: configured for ${providerPick.label} (${modelLabel}). Provider switched to BYOK.`
+  );
 }
 
 export function deactivate() {

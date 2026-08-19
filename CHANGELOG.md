@@ -3,11 +3,21 @@
 All notable changes to AIditor are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.4] - 2026-08-19
+
+### Added
+- BYOK support for Google (Gemini) and Groq.
+
+### Changed
+- "Set BYOK API Key" is now a 3-step wizard: provider, then key, then model.
+
 ## [1.0.3] - 2026-08-16
+
 ### Changed
 - Review panel now opens instantly with a loading state.
+
 ### Fixed
-- Fixed pre-commit hook hanging git commit indefinitely.
+- Fixed pre-commit hook hanging `git commit` indefinitely.
 
 ## [1.0.1] - 2026-08-16
 

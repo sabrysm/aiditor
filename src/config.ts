@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 export type ProviderMode = 'vscode-lm' | 'byok';
-export type ByokProvider = 'anthropic' | 'openai';
+export type ByokProvider = 'anthropic' | 'openai' | 'google' | 'groq';
 
 export interface AIditorConfig {
   provider: ProviderMode;
@@ -20,7 +20,7 @@ export function getConfig(): AIditorConfig {
   return {
     provider: cfg.get<ProviderMode>('provider', 'vscode-lm'),
     byokProvider: cfg.get<ByokProvider>('byokProvider', 'anthropic'),
-    byokModel: cfg.get<string>('byokModel', 'claude-sonnet-4-6'),
+    byokModel: cfg.get<string>('byokModel', ''),
     vscodeLmFamily: cfg.get<string>('vscodeLmFamily', 'gpt-4o'),
     questionCount: cfg.get<number>('questionCount', 3),
     allowShortAnswer: cfg.get<boolean>('allowShortAnswer', true),

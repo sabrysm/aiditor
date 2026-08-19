@@ -110,27 +110,79 @@ export class AnthropicProvider implements LLMProvider {
   }
 }
 
+/** Shared request/response shape for OpenAI-compatible chat completions APIs (OpenAI, Groq). */
+async function openAiCompatibleComplete(
+  hostname: string,
+  apiPath: string,
+  headers: Record<string, string>,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<string> {
+  const response = await httpsPostJson(hostname, apiPath, headers, {
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+  });
+  const content = response.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error(`${hostname} response contained no message content.`);
+  }
+  return content;
+}
+
 /** Bring-your-own-key provider for OpenAI's Chat Completions API. */
 export class OpenAiProvider implements LLMProvider {
   constructor(private apiKey: string, private model: string) {}
 
   async complete(systemPrompt: string, userPrompt: string): Promise<string> {
-    const response = await httpsPostJson(
+    return openAiCompatibleComplete(
       'api.openai.com',
       '/v1/chat/completions',
       { Authorization: `Bearer ${this.apiKey}` },
+      this.model,
+      systemPrompt,
+      userPrompt
+    );
+  }
+}
+
+/** Bring-your-own-key provider for Groq, which exposes an OpenAI-compatible Chat Completions API. */
+export class GroqProvider implements LLMProvider {
+  constructor(private apiKey: string, private model: string) {}
+
+  async complete(systemPrompt: string, userPrompt: string): Promise<string> {
+    return openAiCompatibleComplete(
+      'api.groq.com',
+      '/openai/v1/chat/completions',
+      { Authorization: `Bearer ${this.apiKey}` },
+      this.model,
+      systemPrompt,
+      userPrompt
+    );
+  }
+}
+
+/** Bring-your-own-key provider for Google's Gemini API. */
+export class GoogleProvider implements LLMProvider {
+  constructor(private apiKey: string, private model: string) {}
+
+  async complete(systemPrompt: string, userPrompt: string): Promise<string> {
+    const response = await httpsPostJson(
+      'generativelanguage.googleapis.com',
+      `/v1beta/models/${encodeURIComponent(this.model)}:generateContent?key=${encodeURIComponent(this.apiKey)}`,
+      {},
       {
-        model: this.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
       }
     );
-    const content = response.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('OpenAI response contained no message content.');
+    const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      throw new Error('Google response contained no text content.');
     }
-    return content;
+    return text;
   }
 }

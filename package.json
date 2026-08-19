@@ -73,14 +73,14 @@
         },
         "aiditor.byokProvider": {
           "type": "string",
-          "enum": ["anthropic", "openai"],
+          "enum": ["anthropic", "openai", "google", "groq"],
           "default": "anthropic",
           "description": "Which API to call when aiditor.provider is 'byok'."
         },
         "aiditor.byokModel": {
           "type": "string",
-          "default": "claude-sonnet-4-6",
-          "description": "Model name to request for BYOK calls (e.g. claude-sonnet-4-6, gpt-4o)."
+          "default": "",
+          "description": "Model name to request for BYOK calls (e.g. claude-sonnet-4-6, gpt-4o, gemini-2.5-flash, llama-3.3-70b-versatile). Leave blank to use a sensible default for the selected aiditor.byokProvider."
         },
         "aiditor.vscodeLmFamily": {
           "type": "string",
