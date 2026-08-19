@@ -108,7 +108,8 @@ Developer's answer: ${userAnswer}`;
 }
 
 function extractJson(raw: string): string {
-  const trimmed = raw.trim();
+  const withoutThink = raw.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '');
+  const trimmed = withoutThink.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fenced) return fenced[1].trim();
   const start = trimmed.indexOf('{');

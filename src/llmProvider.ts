@@ -121,6 +121,7 @@ async function openAiCompatibleComplete(
 ): Promise<string> {
   const response = await httpsPostJson(hostname, apiPath, headers, {
     model,
+    max_tokens: 4096,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -177,6 +178,7 @@ export class GoogleProvider implements LLMProvider {
       {
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        generationConfig: { maxOutputTokens: 4096 },
       }
     );
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
