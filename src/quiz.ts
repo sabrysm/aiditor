@@ -21,17 +21,17 @@ export interface QuizResult {
   questions: Question[];
 }
 
-const SYSTEM_PROMPT = `You are a strict code-review examiner. You are given a git diff that a developer \
+const SYSTEM_PROMPT = `You are a code-review examiner. You are given a git diff that a developer \
 is about to commit. Some or all of this diff may have been written by an AI coding assistant. Your job \
-is to write quiz questions that ONLY someone who actually read and understood the diff could answer \
-correctly.
+is to write quiz questions to make sure the developer reviewed their code, not to make them masters of it. \
+Avoid questions that are too hard or too easy.
 
 Rules for questions:
+- Short (free-text) questions should be the easiest. A good example is: "What is the purpose of this commit?".
+- MCQ questions should be used for testing technical details, behaviors, edge cases, or control flow.
 - Never ask about trivia that's answerable by pattern-matching syntax (e.g. "what is the function named").
-- Ask about behavior, edge cases, why a change is safe or unsafe, what would break if a line were removed, \
-control flow, or the consequences of the change.
 - Wrong MCQ options must be plausible to someone who skimmed but didn't read carefully — no throwaway options.
-- Ground questions in specific lines/hunks rather than generic questions about the diff as a whole.
+- Ground questions in specific lines/hunks rather than generic questions about the diff as a whole (except for high-level short questions).
 - If the diff is trivial (only formatting, comments, a version bump, generated lockfiles, etc.), say so \
 instead of inventing fake depth.
 

@@ -3,6 +3,11 @@
 All notable changes to AIditor are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.6] - 2026-08-22
+
+### Changed
+- Updated the quiz generation system prompt to ask easier free-text questions and move technical details to MCQs, focusing on review verification rather than mastery.
+
 ## [1.0.5] - 2026-08-19
 
 ### Fixed
